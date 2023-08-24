@@ -1,24 +1,18 @@
 ﻿using Azure;
 using Azure.AI.Language.QuestionAnswering;
 using Azure.AI.TextAnalytics;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Configuration.Json;
-using System;
 using System.Text;
-using DotNetEnv;
-
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Lab1AI.QnA
 {
-    internal class Program
+    public class Program
     {
-        static void Main(string[] args)
+        private static string translatorEndpoint = "https://api.cognitive.microsofttranslator.com";
+        private static string cogSvcKey = ("12ec3ce1ab024f70ae1553a5b6526bbe");
+        static async Task Main(string[] args)
         {
-            //Env.Load();
-            //string cogSvcEndpoint = Environment.GetEnvironmentVariable("https://langtranslatewesteu.cognitiveservices.azure.com/");
-            //string cogSvcKey = Environment.GetEnvironmentVariable("0e02403e30fd4c7ba70a8b7eb5d0c6c5");
-            //string qnaKey = Environment.GetEnvironmentVariable("ef4e6380edeb4cf08a9510d564871198");
-
             //Keys and endpoints to be able to use AI-components and QnA
             Uri endpoint = new Uri("https://langtranslatetext.cognitiveservices.azure.com/");
             AzureKeyCredential credential = new AzureKeyCredential("3df57ce9444a4431b7de5f8a4e7f8fbf");
@@ -38,8 +32,9 @@ namespace Lab1AI.QnA
 
             //Create an empty variable for the question to use in loop
             var question = "";
-
+            
             Console.WriteLine("What can I help you with?");
+
             while (true)
             {
                 //To tell the user to ask a question and also give the answer back in the question variable
@@ -50,15 +45,25 @@ namespace Lab1AI.QnA
                 string detectedLanguageCode = detectedLanguage.Iso6391Name;
                 Console.WriteLine($"\nLanguage: {detectedLanguageCode}");
 
+                string translated = question;
+
+                if (detectedLanguageCode != "en")
+                {
+                    translated = await Translate(question, detectedLanguageCode);
+                    //Console.WriteLine($"{translated}");
+                }
+
                 // Receive question and send it to QnA
-                Response<AnswersResult> response = client.GetAnswers(question, proj);
+                Response<AnswersResult> response = client.GetAnswers(translated, proj);
 
                 foreach (KnowledgeBaseAnswer answer in response.Value.Answers)
                 {
+                   
                     Console.WriteLine($"Q:{question}");
                     Console.WriteLine($"A:{answer.Answer}");
+                    
                 }
-
+                
                 Console.WriteLine();
                 Console.WriteLine("If you want to end chat, write 'quit', otherwise keep on chatting :) ");
                 Console.WriteLine();
@@ -71,12 +76,35 @@ namespace Lab1AI.QnA
             }
         }
 
-        static async Task<string> Translate(string text, string detectedLanguageCode)
+        static async Task<string> Translate(string text, string sourceLanguage)
         {
             string translation = "";
 
             // Use the Translator translate function
+            object[] body = new object[] { new { Text = text } };
+            var requestBody = JsonConvert.SerializeObject(body);
+            using (var client = new HttpClient())
+            {
+                using (var request = new HttpRequestMessage())
+                {
+                    // Build the request
+                    string path = "/translate?api-version=3.0&from=" + sourceLanguage + "&to=en";
+                    request.Method = HttpMethod.Post;
+                    request.RequestUri = new Uri(translatorEndpoint + path);
+                    request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+                    request.Headers.Add("Ocp-Apim-Subscription-Key", cogSvcKey);
+                    request.Headers.Add("Ocp-Apim-Subscription-Region", "westeurope");
 
+                    // Send the request and get response
+                    HttpResponseMessage response = await client.SendAsync(request).ConfigureAwait(false);
+                    // Read response as a string
+                    string responseContent = await response.Content.ReadAsStringAsync();
+
+                    // Parse JSON array and get translation
+                    JArray jsonResponse = JArray.Parse(responseContent);
+                    translation = (string)jsonResponse[0]["translations"][0]["text"];
+                }
+            }
 
             // Return the translation
             return translation;
@@ -86,18 +114,3 @@ namespace Lab1AI.QnA
 }
 
 
-
-// Get config settings from AppSettings
-//IConfigurationBuilder builder = new ConfigurationBuilder().AddJsonFile("appsettings.json");
-//IConfigurationRoot configuration = builder.Build();
-//string cogSvcEndpoint = configuration["CognitiveServicesEndpoint"];
-//string cogSvcKey = configuration["CognitiveServiceKey"];
-
-
-//Translate the answer to the original language if needed
-//string translatedAnswer = answer.Answer;
-//if (detectedLanguageCode != "en")
-//{
-//    TranslationResult backTranslationResult = TextAnalyticsClient.Translate(new[] { answer.Answer }, detectedLanguageCode);
-//    translatedAnswer = backTranslationResult.Translations[0].Text;
-//}
